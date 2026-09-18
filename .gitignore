@@ -14,8 +14,7 @@ __pycache__/
 .env.local
 
 # Build output
-frontend/dist/
-dist/
+/dist/
 
 # Logs & cache
 *.log
