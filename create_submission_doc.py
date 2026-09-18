@@ -78,7 +78,7 @@ def generate_document(output_path="Darukaa_Earth_Submission_Report.docx"):
 
     p_repo = doc.add_paragraph()
     p_repo.add_run("• Repository URL: ").bold = True
-    repo_link = p_repo.add_run("https://github.com/darukaa-earth/darukaa-earth-platform\n")
+    repo_link = p_repo.add_run("https://github.com/PixellHacker/darukaa-earth-platform\n")
     repo_link.font.color.rgb = RGBColor(0x25, 0x63, 0xEB)
     repo_link.underline = True
     p_repo.add_run("(Note: If repository is private, access has been provisioned to the requested accounts below).")

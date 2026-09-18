@@ -1,6 +1,6 @@
 # 🌍 Darukaa.Earth — Geospatial Carbon & Biodiversity Analytics Platform
 
-[![CI/CD Pipeline](https://github.com/darukaa-earth/darukaa-earth-platform/actions/workflows/ci.yml/badge.svg)](https://github.com/darukaa-earth/darukaa-earth-platform/actions)
+[![CI/CD Pipeline](https://github.com/PixellHacker/darukaa-earth-platform/actions/workflows/ci.yml/badge.svg)](https://github.com/PixellHacker/darukaa-earth-platform/actions)
 [![FastAPI](https://img.shields.io/badge/Backend-FastAPI-009688?style=flat&logo=fastapi)](https://fastapi.tiangolo.com/)
 [![React](https://img.shields.io/badge/Frontend-React_18-61DAFB?style=flat&logo=react)](https://reactjs.org/)
 [![PostGIS](https://img.shields.io/badge/Database-PostgreSQL_%2B_PostGIS-336791?style=flat&logo=postgresql)](https://postgis.net/)
