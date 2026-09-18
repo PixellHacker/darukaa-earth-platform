@@ -1,30 +1,51 @@
 import React, { useEffect, useRef, useState } from 'react';
 import mapboxgl from 'mapbox-gl';
-import { Layers, MousePointerClick, Check, X, Maximize2, Compass } from 'lucide-react';
+import { Layers, MousePointerClick, Check, X, Maximize2, Satellite, Map as MapIcon } from 'lucide-react';
 
-// Free high-resolution open tile style specification that works 100% without any API key!
-const OPEN_DARK_STYLE = {
+// Free high-resolution ESRI Satellite imagery (100% CORS-friendly, zero API key required)
+const SATELLITE_STYLE = {
   version: 8,
   sources: {
-    'carto-dark': {
+    'satellite-tiles': {
       type: 'raster',
       tiles: [
-        'https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png',
-        'https://b.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png',
-        'https://c.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png',
-        'https://d.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png'
+        'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'
       ],
       tileSize: 256,
-      attribution: '© OpenStreetMap contributors, © CARTO'
+      attribution: '© Esri, Maxar, Earthstar Geographics'
     }
   },
   layers: [
     {
-      id: 'carto-dark-layer',
+      id: 'satellite-layer',
       type: 'raster',
-      source: 'carto-dark',
+      source: 'satellite-tiles',
       minzoom: 0,
-      maxzoom: 20
+      maxzoom: 19
+    }
+  ]
+};
+
+// OpenStreetMap street map style
+const OSM_STYLE = {
+  version: 8,
+  sources: {
+    'osm-tiles': {
+      type: 'raster',
+      tiles: [
+        'https://tile.openstreetmap.org/{z}/{x}/{y}.png'
+      ],
+      tileSize: 256,
+      attribution: '© OpenStreetMap contributors'
+    }
+  },
+  layers: [
+    {
+      id: 'osm-layer',
+      type: 'raster',
+      source: 'osm-tiles',
+      minzoom: 0,
+      maxzoom: 19
     }
   ]
 };
@@ -41,22 +62,23 @@ export default function MapViewer({
   const map = useRef(null);
   const [drawingPoints, setDrawingPoints] = useState([]);
   const [mapLoaded, setMapLoaded] = useState(false);
+  const [currentStyle, setCurrentStyle] = useState('satellite'); // 'satellite' or 'osm'
 
   // Initialize Mapbox map
   useEffect(() => {
     if (map.current) return;
 
-    // Mapbox requires accessToken to be non-empty
-    const token = import.meta.env.VITE_MAPBOX_TOKEN || 'pk.eyJ1IjoiZGFydWthYS1kZW1vIiwiYSI6ImNsc3ptdjA5eTAwMjIyanBkbnR3aGZkNXkifQ.demo_token_fallback';
+    // Use environment token or open-tiles identifier (ESRI & OSM tiles do not require any token)
+    const token = import.meta.env.VITE_MAPBOX_TOKEN || 'open-source-tiles';
     mapboxgl.accessToken = token;
 
     try {
       map.current = new mapboxgl.Map({
         container: mapContainer.current,
-        style: OPEN_DARK_STYLE, // High-res open raster tiles that never require a Mapbox key
-        center: [80.0, 18.0], // Centered on South Asia / Global tropics
+        style: SATELLITE_STYLE,
+        center: [80.0, 18.0],
         zoom: 4.2,
-        pitch: 20,
+        pitch: 15,
       });
 
       map.current.addControl(new mapboxgl.NavigationControl({ visualizePitch: true }), 'bottom-right');
@@ -66,10 +88,17 @@ export default function MapViewer({
       });
 
       map.current.on('error', (err) => {
-        console.warn('Mapbox GL event error handled gracefully:', err);
+        console.warn('Map event notice:', err);
       });
-    } catch (mapError) {
-      console.error('Mapbox initialization fallback triggered:', mapError);
+
+      // Fallback timer: ensure mapLoaded is true within 1.5s even if load event was delayed
+      const timer = setTimeout(() => {
+        setMapLoaded(true);
+      }, 1500);
+
+      return () => clearTimeout(timer);
+    } catch (err) {
+      console.error('Mapbox init error:', err);
     }
 
     return () => {
@@ -79,6 +108,17 @@ export default function MapViewer({
       }
     };
   }, []);
+
+  // Switch between Satellite and OSM Street styles
+  const toggleStyle = (styleName) => {
+    if (!map.current) return;
+    setCurrentStyle(styleName);
+    map.current.setStyle(styleName === 'satellite' ? SATELLITE_STYLE : OSM_STYLE);
+    map.current.once('style.load', () => {
+      setMapLoaded(false);
+      setTimeout(() => setMapLoaded(true), 100);
+    });
+  };
 
   // Update GeoJSON layers for existing sites
   useEffect(() => {
@@ -91,7 +131,7 @@ export default function MapViewer({
         if (typeof geom === 'string') {
           try { geom = JSON.parse(geom); } catch (e) { geom = { type: 'Polygon', coordinates: [] }; }
         }
-        if (geom.type === 'Feature') geom = geom.geometry;
+        if (geom && geom.type === 'Feature') geom = geom.geometry;
 
         return {
           type: 'Feature',
@@ -109,68 +149,70 @@ export default function MapViewer({
       })
     };
 
-    // If source exists, update data; else create
-    if (map.current.getSource('sites-data')) {
-      map.current.getSource('sites-data').setData(geojsonData);
-    } else {
-      map.current.addSource('sites-data', {
-        type: 'geojson',
-        data: geojsonData
-      });
+    try {
+      if (map.current.getSource('sites-data')) {
+        map.current.getSource('sites-data').setData(geojsonData);
+      } else {
+        map.current.addSource('sites-data', {
+          type: 'geojson',
+          data: geojsonData
+        });
 
-      // Polygon fill layer
-      map.current.addLayer({
-        id: 'sites-fill',
-        type: 'fill',
-        source: 'sites-data',
-        paint: {
-          'fill-color': [
-            'match',
-            ['get', 'biome_type'],
-            'Mangrove', '#06b6d4',
-            'Peatland', '#f59e0b',
-            'Afforestation', '#10b981',
-            '#10b981' // default emerald
-          ],
-          'fill-opacity': 0.45
-        }
-      });
+        // Polygon fill layer
+        map.current.addLayer({
+          id: 'sites-fill',
+          type: 'fill',
+          source: 'sites-data',
+          paint: {
+            'fill-color': [
+              'match',
+              ['get', 'biome_type'],
+              'Mangrove', '#06b6d4',
+              'Peatland', '#f59e0b',
+              'Afforestation', '#10b981',
+              '#10b981'
+            ],
+            'fill-opacity': 0.5
+          }
+        });
 
-      // Polygon boundary stroke with neon effect
-      map.current.addLayer({
-        id: 'sites-stroke',
-        type: 'line',
-        source: 'sites-data',
-        paint: {
-          'line-color': [
-            'match',
-            ['get', 'biome_type'],
-            'Mangrove', '#38bdf8',
-            'Peatland', '#fbbf24',
-            'Afforestation', '#34d399',
-            '#34d399'
-          ],
-          'line-width': 2.5,
-          'line-opacity': 0.9
-        }
-      });
+        // Polygon boundary stroke
+        map.current.addLayer({
+          id: 'sites-stroke',
+          type: 'line',
+          source: 'sites-data',
+          paint: {
+            'line-color': [
+              'match',
+              ['get', 'biome_type'],
+              'Mangrove', '#38bdf8',
+              'Peatland', '#fbbf24',
+              'Afforestation', '#34d399',
+              '#ffffff'
+            ],
+            'line-width': 3,
+            'line-opacity': 0.95
+          }
+        });
 
-      // Click on polygon site
-      map.current.on('click', 'sites-fill', (e) => {
-        if (e.features && e.features.length > 0) {
-          const siteId = e.features[0].properties.id;
-          const found = sites.find((s) => s.id === siteId);
-          if (found) onSelectSite(found);
-        }
-      });
+        // Click on polygon site
+        map.current.on('click', 'sites-fill', (e) => {
+          if (e.features && e.features.length > 0) {
+            const siteId = e.features[0].properties.id;
+            const found = sites.find((s) => s.id === siteId);
+            if (found) onSelectSite(found);
+          }
+        });
 
-      // Cursor change on hover
-      map.current.on('mouseenter', 'sites-fill', () => {
-        if (!drawingMode && map.current) map.current.getCanvas().style.cursor = 'pointer';
-      });
-      map.current.on('mouseleave', 'sites-fill', () => {
-        if (!drawingMode && map.current) map.current.getCanvas().style.cursor = '';
-      });
+        map.current.on('mouseenter', 'sites-fill', () => {
+          if (!drawingMode && map.current) map.current.getCanvas().style.cursor = 'pointer';
+        });
+        map.current.on('mouseleave', 'sites-fill', () => {
+          if (!drawingMode && map.current) map.current.getCanvas().style.cursor = '';
+        });
+      }
+    } catch (e) {
+      console.warn('Layer update catch:', e);
     }
   }, [sites, mapLoaded]);
 
@@ -180,14 +222,14 @@ export default function MapViewer({
     try {
       let geom = selectedSite.geometry;
       if (typeof geom === 'string') geom = JSON.parse(geom);
-      if (geom.type === 'Feature') geom = geom.geometry;
+      if (geom && geom.type === 'Feature') geom = geom.geometry;
 
-      const coords = geom.coordinates ? geom.coordinates[0] : null;
+      const coords = geom && geom.coordinates ? geom.coordinates[0] : null;
       if (coords && coords.length > 0) {
         const center = coords[0];
         map.current.flyTo({
           center: [center[0], center[1]],
-          zoom: 11,
+          zoom: 12,
           duration: 1800,
           essential: true
         });
@@ -249,34 +291,38 @@ export default function MapViewer({
       });
     }
 
-    if (map.current.getSource('drawing-source')) {
-      map.current.getSource('drawing-source').setData(drawingGeoJSON);
-    } else {
-      map.current.addSource('drawing-source', {
-        type: 'geojson',
-        data: drawingGeoJSON
-      });
+    try {
+      if (map.current.getSource('drawing-source')) {
+        map.current.getSource('drawing-source').setData(drawingGeoJSON);
+      } else {
+        map.current.addSource('drawing-source', {
+          type: 'geojson',
+          data: drawingGeoJSON
+        });
 
-      map.current.addLayer({
-        id: 'drawing-fill',
-        type: 'fill',
-        source: 'drawing-source',
-        paint: {
-          'fill-color': '#10b981',
-          'fill-opacity': 0.35
-        }
-      });
+        map.current.addLayer({
+          id: 'drawing-fill',
+          type: 'fill',
+          source: 'drawing-source',
+          paint: {
+            'fill-color': '#10b981',
+            'fill-opacity': 0.4
+          }
+        });
 
-      map.current.addLayer({
-        id: 'drawing-stroke',
-        type: 'line',
-        source: 'drawing-source',
-        paint: {
-          'line-color': '#34d399',
-          'line-width': 2.5,
-          'line-dasharray': [2, 2]
-        }
-      });
+        map.current.addLayer({
+          id: 'drawing-stroke',
+          type: 'line',
+          source: 'drawing-source',
+          paint: {
+            'line-color': '#34d399',
+            'line-width': 3,
+            'line-dasharray': [2, 2]
+          }
+        });
+      }
+    } catch (e) {
+      console.warn('Drawing preview catch:', e);
     }
   }, [drawingPoints, mapLoaded]);
 
@@ -285,7 +331,6 @@ export default function MapViewer({
       alert('Please click at least 3 points on the map to define a polygon site.');
       return;
     }
-    // Close polygon
     const closed = [...drawingPoints, drawingPoints[0]];
     onCompleteDrawing(closed);
     setDrawingPoints([]);
@@ -301,6 +346,58 @@ export default function MapViewer({
       {/* Map Container */}
       <div ref={mapContainer} style={{ width: '100%', height: '100%' }} />
 
+      {/* Satellite / Street Style Switcher */}
+      <div style={{
+        position: 'absolute',
+        top: '20px',
+        right: '60px',
+        background: 'rgba(10, 16, 14, 0.85)',
+        backdropFilter: 'blur(12px)',
+        border: '1px solid rgba(255, 255, 255, 0.12)',
+        borderRadius: '10px',
+        padding: '3px',
+        display: 'flex',
+        gap: '4px',
+        zIndex: 30
+      }}>
+        <button
+          onClick={() => toggleStyle('satellite')}
+          style={{
+            background: currentStyle === 'satellite' ? '#10b981' : 'transparent',
+            color: currentStyle === 'satellite' ? '#ffffff' : '#94a3b8',
+            border: 'none',
+            borderRadius: '8px',
+            padding: '6px 10px',
+            fontSize: '0.72rem',
+            fontWeight: 600,
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '5px'
+          }}
+        >
+          <Satellite size={14} /> Satellite
+        </button>
+        <button
+          onClick={() => toggleStyle('osm')}
+          style={{
+            background: currentStyle === 'osm' ? '#10b981' : 'transparent',
+            color: currentStyle === 'osm' ? '#ffffff' : '#94a3b8',
+            border: 'none',
+            borderRadius: '8px',
+            padding: '6px 10px',
+            fontSize: '0.72rem',
+            fontWeight: 600,
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '5px'
+          }}
+        >
+          <MapIcon size={14} /> Street Map
+        </button>
+      </div>
+
       {/* Drawing Mode Banner & Controls */}
       {drawingMode && (
         <div style={{
@@ -308,7 +405,7 @@ export default function MapViewer({
           top: '20px',
           left: '50%',
           transform: 'translateX(-50%)',
-          background: 'rgba(10, 18, 15, 0.92)',
+          background: 'rgba(10, 18, 15, 0.94)',
           backdropFilter: 'blur(16px)',
           border: '1px solid #10b981',
           borderRadius: '16px',
@@ -316,7 +413,7 @@ export default function MapViewer({
           display: 'flex',
           alignItems: 'center',
           gap: '20px',
-          boxShadow: '0 10px 35px rgba(0, 0, 0, 0.6), 0 0 20px rgba(16, 185, 129, 0.3)',
+          boxShadow: '0 10px 35px rgba(0, 0, 0, 0.7), 0 0 20px rgba(16, 185, 129, 0.3)',
           zIndex: 40,
           animation: 'slideUp 0.2s ease-out'
         }}>
@@ -373,7 +470,7 @@ export default function MapViewer({
         position: 'absolute',
         bottom: '24px',
         left: '24px',
-        background: 'rgba(10, 16, 14, 0.85)',
+        background: 'rgba(10, 16, 14, 0.88)',
         backdropFilter: 'blur(10px)',
         border: '1px solid rgba(255, 255, 255, 0.1)',
         borderRadius: '12px',
